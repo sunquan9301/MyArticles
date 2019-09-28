@@ -7,8 +7,7 @@
 4. **Coroutine核心功能**
 5. **Coroutine实现方式**
 6. **Coroutine in Kotlin使用，原理和实践**
-7. **Coroutine for Room and Coroutine for retrofit**
-8. **Coroutine in Android**
+7. **Kotlin Coroutine in Android**
 
 ## Coroutine in Flutter
 
@@ -118,7 +117,7 @@ GlobalScope.launch(Dispatchers.IO) {
 }
 ```
 
-## 协程核心
+## 协程核心功能
 
 协程的**核心功能**是：**控制流的主动恢复和让出**
 
@@ -157,4 +156,638 @@ GlobalScope.launch(Dispatchers.IO) {
 可以看到核心还是**Yield**和**Resume**方法。
 
 ### 迭代器，生成器和Yield
+
+维基百科上对迭代定义为：**迭代**是重复反馈过程的活动，其目的通常是为了接近并到达所需的目标或结果。每一次对过程的重复被称为一次"迭代"，而每一次迭代得到的结果会被用来作为下一次迭代的初始值。
+
+####可迭代对象(Iterable)与迭代器(iterator)
+
+所有能够接受for…in…操作的对象都是可迭代对象，如列表、字符串、文件等。从Java语言来看Iterable类，注释所说实现了Iterable接口类都能够接受"for-each loop" statement。
+
+```java
+/**
+ * Implementing this interface allows an object to be the target of
+ * the "for-each loop" statement. 
+ */
+public interface Iterable<T> {
+    /**
+     * Returns an iterator over elements of type {@code T}.
+     * @return an Iterator.
+     */
+    Iterator<T> iterator();
+    /**
+     * Performs the given action for each element of the {@code Iterable}
+     * until all elements have been processed or the action throws an
+     * exception.  Unless otherwise specified by the implementing class,
+     * actions are performed in the order of iteration 
+     */
+    default void forEach(Consumer<? super T> action) {
+        Objects.requireNonNull(action);
+        for (T t : this) {
+            action.accept(t);
+        }
+    }
+    default Spliterator<T> spliterator() {
+        return Spliterators.spliteratorUnknownSize(iterator(), 0);
+    }
+}
+```
+
+Iterable接口提供2个常见的方法:
+
+- Iterator<T> iterator();
+- default void forEach(Consumer<? super T> action)
+
+可以看到iterator方法返回Iterator对象，在Java中Iterator同样是一个接口：
+
+```java
+/**
+ * An iterator over a collection.  {@code Iterator} takes the place of
+ * {@link Enumeration} in the Java Collections Framework.  
+ */
+public interface Iterator<E> {
+    /**
+     * @return {@code true} if the iteration has more elements
+     */
+    boolean hasNext();
+    /**
+     * Returns the next element in the iteration.
+     */
+    E next();
+
+    /**
+     * Removes from the underlying collection the last element returned
+     * by this iterator (optional operation).  This method can be called
+     * only once per call to {@link #next}.  
+     */
+    default void remove() {
+        throw new UnsupportedOperationException("remove");
+    }
+    default void forEachRemaining(Consumer<? super E> action) {
+        Objects.requireNonNull(action);
+        while (hasNext())
+            action.accept(next());
+    }
+}
+```
+
+Iterator提供了如下常见方法：
+
+- boolean hasNext();
+- E next();
+- default void remove();
+
+正是 next() 使得iterator能在每次被调用时，返回一个单一的值，即iterator是消耗型的，即每一个值都被使用过后，就消失了。
+
+在Java里日常使用的就是ArrayList类了:
+
+```java
+
+    /**
+     * An optimized version of AbstractList.Itr
+     */
+    private class Itr implements Iterator<E> {
+        protected int limit = ArrayList.this.size;
+
+        int cursor;       // index of next element to return
+        int lastRet = -1; // index of last element returned; -1 if no such
+        int expectedModCount = modCount;
+
+        public boolean hasNext() {
+            return cursor < limit;
+        }
+
+        @SuppressWarnings("unchecked")
+        public E next() {
+            if (modCount != expectedModCount)
+                throw new ConcurrentModificationException();
+            int i = cursor;
+            if (i >= limit)
+                throw new NoSuchElementException();
+            Object[] elementData = ArrayList.this.elementData;
+            if (i >= elementData.length)
+                throw new ConcurrentModificationException();
+            cursor = i + 1;
+            return (E) elementData[lastRet = i];
+        }
+
+        public void remove() {
+            if (lastRet < 0)
+                throw new IllegalStateException();
+            if (modCount != expectedModCount)
+                throw new ConcurrentModificationException();
+            try {
+                ArrayList.this.remove(lastRet);
+                cursor = lastRet;
+                lastRet = -1;
+                expectedModCount = modCount;
+                limit--;
+            } catch (IndexOutOfBoundsException ex) {
+                throw new ConcurrentModificationException();
+            }
+        }
+    }
+```
+
+可以看到ArrayList用一个变量 int cursor;来保存每次next()后的上下文。
+
+对一个iterable用for…in…进行迭代时，通常是通过调用iterator()方法得到一个Iterator,然后循环的调用Iterator的next()方法取得每一次对值，知道Iterator为空。如下所图：
+
+![WX20190928-173115@2x](/Users/sunquan/Desktop/WX20190928-173115@2x.jpg)
+
+#### 生成器Generator
+
+定义如下：
+
+```markdown
+In computer science, a generator is a special routine that can be used to **control the iteration behaviour of a loop**. 
+In fact, all generators are iterators.[1] A generator is very similar to a function that returns an array, in that a generator has parameters, can be called, and generates a sequence of values. 
+However, instead of building an array containing all the values and returning them all at once, **a generator yields the values one at a time**, which requires less memory and allows the caller to get started processing the first few values immediately. In short, a generator looks like a function but behaves like an iterator.
+```
+
+生成器是这样一个函数，它记住**上一次返回时在函数体中对位置。**
+
+对生成器函数的第二次（或第n次）调用跳转至该函数中间，而**上次调用的所有局部变量都保持不变。**
+
+生成器不仅 **“记住” 了它的数据状态**；生成器还 **“记住” 了它的流控制构造**中的位置。 
+
+#### Yield关键字
+
+在定义中所说：a generator yields the values one at a time。
+
+- yield类似return关键字，不同在于函数返回的是一个生成器
+- yield可以暂停一个函数并返回中间结果。使用yield的函数将保存执行环境，即函数的参数。在下一次调用时，所有参数都会恢复，然后从先前暂停的地方开始执行，直到遇到下一个yield再次暂停。
+
+如下斐波那契数列：
+
+```python
+>>> def fib():
+	a,b = 0,1
+	while True:
+		a,b = b,a+b
+		yield b
+
+		
+>>> myFib = fib()
+>>> next(myFib)
+1
+>>> next(myFib)
+2
+>>> next(myFib)
+3
+>>> next(myFib)
+5
+>>> 
+```
+
+#Coroutine实现方式
+
+协程有一下几种实现方式：
+
+- 利用glibc的ucontext组件
+- 使用汇编代码来切换上下文
+- 利用C语言语法switch-case来实现
+- 利用了C语言的setjmp和longjmp
+
+这里分析下第一种的思想：
+
+实现思路：每一线程中，有一个调度器，就是一个循环，不断的从可运行的协程队列中取出协程，并利用swapcontext恢复写成的上下文。当一个协程放弃CPU时，通过swapcontext恢复调度器上下文从而将控制权归还给调度器。每个协程通过getcontext和makecontext。
+
+先介绍下几个API
+
+```c
+//该函数初始化ucp所指向的结构体ucontext_t
+int getcontext(ucontext_t *ucp)
+  
+//函数恢复用户上下文为ucp所指向的上下文。
+int setcontext(const ucontext_t *ucp)
+  
+//函数修改ucp所指向的上下文，程序的执行会切换到func的调用，通过makecontext()调用的argc传递func的参数。
+void makecontext(ucontext_t *ucp, void (*func)(void), int argc, ...)
+
+//函数保存当前的上下文到oucp所指向的数据结构，并且设置到ucp所指向的上下文。
+int swapcontext(ucontext_t *restrict oucp, const ucontext_t *restrict ucp)
+
+```
+
+
+
+用来表示协程的Task类
+
+```c
+struct Task        
+{ 
+  Context context;// 当前协程上下文
+  Task  *next; //通过这两个指针将task串起来
+  Task  *prev;
+  Task  *allnext;
+  Task  *allprev;
+  void  (*startfn)(void*);//当前协程的执行入口函数
+  void  *startarg;//参数
+  void  *udata;
+  uchar *stk; // 当前协程可以使用的堆栈，初始化为栈顶地址
+  uint  stksize;// 当前协程可以使用的堆栈大小
+  int ready;
+	...
+};
+```
+
+新增一个协程
+
+```c
+static Task* taskalloc(void (*fn)(void*), void *arg, uint stack)
+{                                                                                                                                                                    
+  Task *t;
+  sigset_t zero;
+  uint x, y;
+  ulong z;
+
+  /* allocate the task and stack together */
+  t = malloc(sizeof *t+stack);    
+  if(t == nil){
+    fprint(2, "taskalloc malloc: %r\n");
+    abort();
+  }
+  memset(t, 0, sizeof *t);
+  //初始化各种参数
+  t->stk = (uchar*)(t+1);
+  t->stksize = stack;
+  t->startfn = fn;                // 协程入口函数
+  t->startarg = arg;              // 协程入口函数参数
+	//...
+  //这里调用了getcontext初始化当前协程上下文
+  if(getcontext(&t->context.uc) < 0){              
+    fprint(2, "getcontext: %r\n");
+    abort();
+  }
+	//...
+  t->context.uc.uc_stack.ss_size = t->stksize-64;   //ss_size成员为栈大小
+  t->context.uc.uc_stack.ss_sp = 
+    (char*)t->context.uc.uc_stack.ss_sp
+    +t->context.uc.uc_stack.ss_size;
+  //这里调用makecontext入口函数为taskstart参数为y,x
+  makecontext(&t->context.uc, (void(*)())taskstart, 2, y, x);   
+  //...
+  return t;
+}
+```
+
+然后调用taskready将这个协程放入可运行队列中：
+
+```c
+void taskready(Task *t)
+{
+  t->ready = 1; //
+  addtask(&taskrunqueue, t);   //将协程放入到可运行队列中
+}
+```
+
+调度器
+
+```c
+static void taskscheduler(void)
+{
+  int i;
+  Task *t;
+  for(;;){                          //无限循环
+    if(taskcount == 0)
+      exit(taskexitval);
+    t = taskrunqueue.head;          //从可运行队列头部取出下一个运行的协程
+   	//...
+    deltask(&taskrunqueue, t);      //从可运行队列中将它删除
+    t->ready = 0;
+    taskrunning = t;   //将t设置为当前正在运行的协程，taskrunning是一个全局变量
+    tasknswitch++;     //统计值，协程一共执行了多少次
+    // 通过swapcontext切换到目标协程，并且将调度器上下文保存在全局变量taskschedcontext中
+    swapcontext(&taskschedcontext, &t->context);    
+    //...
+}
+```
+
+协程的yield方法
+
+```c
+int taskyield(void)         
+{
+  int n;
+  n = tasknswitch;
+  taskready(taskrunning); // 将自己设置为ready重新放回可运行队列
+  taskstate("yield");
+  taskswitch();           //将控制权还给调度器
+  return tasknswitch - n - 1;
+}
+```
+
+## Coroutine in Kotlin使用，原理和实践
+
+Kotlin官网上详细的介绍了协程的基本使用，基本使用方式如下：
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() {
+    GlobalScope.launch { // 在后台启动一个新的协程并继续
+        delay(1000L) // 非阻塞的等待 1 秒钟（默认时间单位是毫秒）
+        println("World!") // 在延迟后打印输出
+    }
+    println("Hello,") // 协程已在等待时主线程还在继续
+    Thread.sleep(2000L) // 阻塞主线程 2 秒钟来保证 JVM 存活
+}
+```
+
+Kotlin Coroutine是Kotlin为了实现更好的异步和并发程序所提供的一个特性，从1.1版本开始引入不同于其他的编程语言，Kotlin将其Coroutine特性的大部分内容作为了一个扩展库：Kolinx.coroutines。
+
+Kotlin 1.2中，Kotlin Coroutine还只是一个实验特性。Kotlin Coroutine相关类的包名包含了experimental的字样。Kotline1.3则正是包含Coroutine的特性，并趋于稳定。
+
+用一句话概括Kotlin Couroutine的特点即是**"以同步之名，行异步之实"**。同时认清以下几个概念：
+
+**suspending**
+
+- 功能：使程序执行过程暂停，又不挂起线程
+- 使用限制：
+  - 在另一个suspending方法中
+  - 在Coroutine Builder中被调用
+- 一些方法：
+  - delay
+  - await
+  - awaitSingle
+
+**Coroutine Builder**
+
+- 定义：
+  - 创建Coroutine, 通过一些方法，接受suspending lambda作为参数，将其放入Coroutine中执行
+- 使用限制
+  - 在另一个suspending方法中
+  - 在Coroutine Builder中被调用
+- 常见方法
+  - runBlocking
+  - launch
+  - async
+
+**CoroutineScope 和CoroutineContext**
+
+协程总是运行在一些以 CoroutineContext 类型为代表的上下文中，它们被定义在了 Kotlin 的标准库里。
+
+GlobalScope.runBlocking(launch, async)
+
+**CoroutineDispatcher**
+
+ 协程调度器，它确定了哪些线程或与线程相对应的协程执行。协程调度器可以将协程限制在一个特定的线程执行，或将它分派到一个线程池，亦或是让它不受限地运行。如下：
+
+```kotlin
+/**
+ * Groups various implementations of [CoroutineDispatcher].
+ */
+public actual object Dispatchers {
+    @JvmStatic
+    public actual val Default: CoroutineDispatcher = createDefaultDispatcher()
+
+    @JvmStatic
+    public actual val Main: MainCoroutineDispatcher get() = MainDispatcherLoader.dispatcher
+
+    @JvmStatic
+    @ExperimentalCoroutinesApi
+    public actual val Unconfined: CoroutineDispatcher = kotlinx.coroutines.Unconfined
+
+    @JvmStatic
+    public val IO: CoroutineDispatcher = DefaultScheduler.IO
+}
+
+```
+
+
+
+### Kotlin Coroutine原理解析
+
+我们从一段代码开始：
+
+```kotlin
+fun postItem(item: Item): PostResult {
+  val token = requestToken()
+  val post = createPost(token, item)
+  val postResult = processPost(post)
+  return postResult
+}
+```
+
+优点：Direct Style，清晰可见，
+
+缺点：同步执行，执行线程会被阻塞导致效率不高。并发量高的场景会产生性能问题影响整个系统。
+
+因此可以转为callBack方式
+
+```kotlin
+fun postItem(item: Item) {
+  requestToken { token ->
+    createPost(token, item) { post ->
+      processPost(post) { postResult ->
+        handleResult(postResult)
+      }
+    }
+  }
+}
+```
+
+优点：提高了执行效率
+
+缺点：可读性差，debug起来难
+
+自己曾经写过这样的业务代码，一旦出现一些问题，真的很难调试。
+
+```kotlin
+fun launch(context: Activity) {
+  /**优先级561324
+        1.新手礼包弹框
+        2.视频断了重拍弹框
+        3.push消息开启弹框
+        4.游戏断线重连弹框
+        5.强制升级弹框
+        6.赛季结束开始弹框
+         **/
+  UpdateManager.getInstance().checkUpdateSilent(context, object : ActionUtil.Action1<Boolean> {
+    override fun call(isUpdate: Boolean) {
+      if (!isUpdate) {
+        showNewSeasonNotifyDialog(context, object : ActionUtil.Action0 {
+          override fun call() {
+            showNewUserPropsDialog(context, object : ActionUtil.Action0 {
+              override fun call() {
+                showPushDialog(context, object : ActionUtil.Action0 {
+                  override fun call() {
+                    showGameReconnDialog(context)
+                  }
+                })
+              }
+            })
+          }
+        })
+      }
+    }
+  })
+}
+```
+
+而使用Coroutine则只需要加入suspend关键字就可以了
+
+```kotlin
+suspend fun postItem(item: Item): PostResult {
+  val token = requestToken()
+  val post = createPost(token, item)
+  val postResult = processPost(post)
+  return postResult
+}
+```
+
+增加`suspend`关键字，就能达到同Callback风格相同的效率，那么这是怎么实现的呢？
+
+我们来看一下编译后的样子：
+
+```kotlin
+fun postItem(item: Item, cont: Continuation): Any? {
+  val sm = cont as? ThisSM ?: object : ThisSM {
+    fun resume(…) {
+      postItem(null, this)
+    }
+  }
+ 
+  switch (sm.label) {
+	case 0:
+      sm.item = item
+      sm.label = 1
+      return requestToken(sm)
+    case 1:
+      val item = sm.item
+      val token = sm.result as Token
+      sm.label = 2 
+      return createPost(token, item, sm)
+    case 2:
+      val post = sm.result as Post
+      sm.label = 3
+      return processPost(post, sm)
+    case 3:
+      return sm.result as PostResult
+}
+```
+
+可以看出多了一个类`Continuation`类，那么Kotlin编译器做了哪些处理？如下：
+
+- 增加了`Continuation`类型入参，返回值变为`Object`
+- 生成 `Continuation` 类型的匿名内部类
+- 对 suspending 方法的调用变为 switch 形式的状态机
+
+ `Continuation` 类定义如下：
+
+```kotlin
+public interface Continuation<in T> {
+  public val context: CoroutineContext
+  public fun resume(value: T)
+  public fun resumeWithException(exception: Throwable)
+}
+```
+
+- `resume`方法，用于恢复暂停的Coroutine的执行，
+
+- `CoroutineContext`属性用于保存Coroutine的上下文
+
+上文已知：协程的核心功能是控制流的恢复和让出， 以及其2个核心方法：yield和resume
+
+**那么什么时候暂停？什么时候恢复呢？**
+
+**1.暂停：**
+
+```kotlin
+switch (sm.label) {
+  case 0:
+    sm.item = item
+    sm.label = 1
+    return requestToken(sm)
+  case 1:
+    val item = sm.item
+    val token = sm.result as Token
+    sm.label = 2 
+    return createPost(token, item, sm)
+  case 2:
+    val post = sm.result as Post
+    sm.label = 3
+    return processPost(post, sm)
+  case 3:
+    return sm.result as PostResult
+```
+
+从上文代码可以看到suspending 方法编译之后，会将原来的方法体变为一个由 switch 语句构成的状态机
+
+Kotlin Coroutine 的运行依赖于各种 Callback 机制。一个 suspending 方法调用到最后，就是注册一个回调，方法执行结果通过这个回调来处理。当回调注册完毕之后，线程就无需等待，从而返回，结束调用。
+
+**2.恢复**
+
+```kotlin
+val sm = cont as? ThisSM ?: object : ThisSM {
+    fun resume(…) {
+      postItem(null, this)
+    }
+  }
+```
+
+函数开头定义了sm，在sm中实现了resume方法，在resume方法中会调用自己，并把自己作为参数传入。
+
+在switch的每个case中回去更新sm.label字段，从而达到记录上下文的作用，从而在恢复的时候找到对应的入口。
+
+了解了Kotlin Coroutine的状态机原理，完全可以根据其思想自己封装一个小框架，从而解决某些特定业务，从而提高开发效率。
+
+##Kotlin Coroutine in Android
+
+以往Android project通常使用RxJava作为线程切换，但是RxJava的库很大，当然可以自己抽离起线程切换实现类和一些操作符，或者可以自己根据RxJava自己写一个简单的线程切换，但是其丰富的操作符则不是一时半会能自己写出来的。 
+
+因此在新项目中，自己则使用了Kotlin Coroutine来作为线程使用场景，具体在Android项目里使用到的业务场景如下：
+
+**1.和Room结合管理数据库**
+
+- ```groovy
+  //Kotlin Extensions and Coroutines support for Room
+  androidx.room:room-ktx:$room_version
+  ```
+
+androidx.room:room-ktx已经提供了Coroutines support for Room只要在Dao中更改如下：
+
+```kotlin
+@Dao
+interface UserDao {
+    @Query("SELECT * FROM user")
+    suspend fun getAll(): List<User>
+
+    @Query("SELECT * FROM user WHERE uid IN (:userIds)")
+    suspend fun loadAllByIds(userIds: IntArray): List<User>
+
+    @Query("SELECT * FROM user WHERE first_name LIKE :first AND " +
+            "last_name LIKE :last LIMIT 1")
+    suspend fun findByName(first: String, last: String): User
+
+    @Insert
+    suspend fun insertAll(vararg users: User)
+
+    @Delete
+    suspend fun delete(user: User)
+}
+```
+
+注意suspend方法要在Coroutine Builder里面调用哦
+
+**2.和Retrofit作为请求数据所用**
+
+- Retrofit也已经提供了支持库
+
+- ```groovy
+  LIB_RETRIFIT_COROUTINE=com.jakewharton.retrofit:retrofit2-kotlin-coroutines-adapter:0.9.2
+  ```
+
+只要**传入对应的Adapter就可以了CoroutineCallAdapterFactory.create()**，至于如何实现的，可参考Retrofit的源码
+
+```kotlin
+retrofit = new Retrofit.Builder()
+                .baseUrl(Constants.API_HOST_PREFIX)
+          .addConverterFactory(GsonConverterFactory.create(Json.getGson()))
+               .addCallAdapterFactory(CoroutineCallAdapterFactory.create())
+                .client(apiOkHttpClient)
+                .build();
+```
+
+**3.封装一个协程类作为线程使用场景**
 
