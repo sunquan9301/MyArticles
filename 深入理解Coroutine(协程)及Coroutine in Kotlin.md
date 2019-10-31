@@ -56,7 +56,7 @@ wikipedia里定义如下
 
 > Coroutines are  **computer program components** that generalize subroutines for **non-preemptive multitasking**, by allowing execution to be **suspended and resumed**. 
 
-协程是一个**计算机组件**，用于**非抢占式的多任务执行**，于此同时允许执行的程序可以被**挂起和重新恢复**，具体什么概念呢，后面将围绕这个定义慢慢道来。
+协程是一个**计算机组件**，用于**非抢占式的多任务执行**，与此同时允许执行的程序可以被**挂起和重新恢复**，具体什么概念呢，后面将围绕这个定义慢慢道来。
 
 #### 背景
 
@@ -79,7 +79,7 @@ wikipedia里定义如下
   - **进程出现**
 - 进程是一个实体，包括**程序代码以及其相关资源**(内存，I/O，文件等)，可被操作系统调度。但想一边操作I/O进行输入输出，一边想进行加减计算，就得两个进程，这样写代码，内存就爆表了。于是又想着能否有一轻量级进程呢，**只执行程序，不需要独立的内存，I/O等资源，而是共享已有资源，于是产生了线程。**
 
-![1](/Users/sunquan/Desktop/1.jpg)
+![20191031182227](/Users/sunquan/mine/MyArticles/20191031182227.png)
 
 - 一个进程可以跑很多个线程处理并发，但是**线程进行切换的时候，操作系统会产生中断，线程会切换到相应的内核态，并进行上下文的保存**，这个过程不受上层控制，是操作系统进行管理。然而内核态线程会产生性能消耗，因此线程过多，并不一定提升程序执行的效率。正是由于**1.线程的调度不能精确控制**；**2.线程的切换会产生性能消耗**。**协程出现了。**
 
@@ -103,7 +103,7 @@ wikipedia里定义如下
 2. 在协程里，去调用接口获取结果。
 3. 拿到结果，使用withContext(Dispatchers.Main)切换到主线程并更新界面
 
-是不是很简洁，这就是同步思维写异步代码，不需要传入回调，也不需要Observe或轮询查询请求结果。
+很简洁，这就是同步思维写异步代码，不需要传入回调，也不需要Observe或轮询查询请求结果。
 
 ```kotlin
 @GET("/user/search")
@@ -290,9 +290,9 @@ Iterator提供了如下常见方法：
 
 可以看到ArrayList用一个变量 int cursor;来保存每次next()后的上下文。
 
-对一个iterable用for…in…进行迭代时，通常是通过调用iterator()方法得到一个Iterator,然后循环的调用Iterator的next()方法取得每一次对值，知道Iterator为空。如下所图：
+对一个iterable用for…in…进行迭代时，通常是通过调用iterator()方法得到一个Iterator,然后循环的调用Iterator的next()方法取得每一次值，直到Iterator为空。如下所图：
 
-![WX20190928-173115@2x](/Users/sunquan/Desktop/WX20190928-173115@2x.jpg)
+![20181228164039662](/Users/sunquan/mine/MyArticles/20181228164039662.jpg)
 
 #### 生成器Generator
 
@@ -304,11 +304,11 @@ In fact, all generators are iterators.[1] A generator is very similar to a funct
 However, instead of building an array containing all the values and returning them all at once, **a generator yields the values one at a time**, which requires less memory and allows the caller to get started processing the first few values immediately. In short, a generator looks like a function but behaves like an iterator.
 ```
 
-生成器是这样一个函数，它记住**上一次返回时在函数体中对位置。**
+生成器是这样一个函数，它记住**上一次返回时在函数体中的位置。**
 
 对生成器函数的第二次（或第n次）调用跳转至该函数中间，而**上次调用的所有局部变量都保持不变。**
 
-生成器不仅 **“记住” 了它的数据状态**；生成器还 **“记住” 了它的流控制构造**中的位置。 
+生成器不仅 **“记住” 了它的数据状态**；生成器还 **“记住” 了它在流控制构造**中的位置。 
 
 #### Yield关键字
 
@@ -728,13 +728,13 @@ val sm = cont as? ThisSM ?: object : ThisSM {
 
 函数开头定义了sm，在sm中实现了resume方法，在resume方法中会调用自己，并把自己作为参数传入。
 
-在switch的每个case中回去更新sm.label字段，从而达到记录上下文的作用，从而在恢复的时候找到对应的入口。
+在switch的每个case中会去更新sm.label字段，从而达到记录上下文的作用，从而在恢复的时候找到对应的入口。
 
 了解了Kotlin Coroutine的状态机原理，完全可以根据其思想自己封装一个小框架，从而解决某些特定业务，从而提高开发效率。
 
 ##Kotlin Coroutine in Android
 
-以往Android project通常使用RxJava作为线程切换，但是RxJava的库很大，当然可以自己抽离起线程切换实现类和一些操作符，或者可以自己根据RxJava自己写一个简单的线程切换，但是其丰富的操作符则不是一时半会能自己写出来的。 
+以往Android project通常使用RxJava作为线程切换，但是RxJava的库很大，当然可以自己抽离一些线程切换实现类和一些操作符，或者可以自己根据RxJava自己写一个简单的线程切换，但是其丰富的操作符则不是一时半会能自己写出来的。 
 
 因此在新项目中，自己则使用了Kotlin Coroutine来作为线程使用场景，具体在Android项目里使用到的业务场景如下：
 
@@ -770,7 +770,7 @@ interface UserDao {
 
 注意suspend方法要在Coroutine Builder里面调用哦
 
-**2.和Retrofit作为请求数据所用**
+**2.和Retrofit结合作为请求数据所用**
 
 - Retrofit也已经提供了支持库
 
@@ -789,5 +789,90 @@ retrofit = new Retrofit.Builder()
                 .build();
 ```
 
-**3.封装一个协程类作为线程使用场景**
+**3.一个简单的协程工具类线程使用场景**
+
+```kotlin
+class LCoroutine<T : Any>(var source: suspend CoroutineScope.() -> T) {
+    val TAG = "LCoroutine"
+    private var mainHandler: Handler = Handler(Looper.getMainLooper())
+    private var errorConsumer: (Int, String) -> Unit = { statusCode, errorMsg ->
+        Log.e(TAG, "statusCode = $statusCode, errorMsg = $errorMsg")
+    }
+    private var succConsumer: (T) -> Unit = {
+    }
+    private var fromDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private var thenDispatcher: CoroutineDispatcher = Dispatchers.Main
+    val handler = CoroutineExceptionHandler { _, exception ->
+        Log.e(TAG, "Caught $exception with suppressed ${exception.suppressed.contentToString()}")
+        if (exception is HttpException) {
+           ...
+            } catch (e: Throwable) {
+            }
+        }
+  			mainHandler.post{
+        errorConsumer(Constants.ResponseCode.COROUTINE_EXCEPTION_CODE, exception.toString())
+        }
+    }
+
+    fun fromOn(from: CoroutineDispatcher): LCoroutine<T> {
+        fromDispatcher = from
+        return this;
+    }
+
+    fun thenOn(then: CoroutineDispatcher): LCoroutine<T> {
+        thenDispatcher = then
+        return this;
+    }
+
+    fun succ(success: (T) -> Unit): LCoroutine<T> {
+        succConsumer = success
+        return this
+    }
+
+    fun execute(): Job {
+        return GlobalScope.launch(fromDispatcher + handler) {
+            try {
+              	//
+                withTimeout(30000) {
+                    val result = source()
+                    withContext(thenDispatcher) {
+                        if(result == null){
+                           errorConsumer(-1, "request timeout")
+                        }else{
+                          succConsumer(result)
+                        }                       
+                    }
+                }
+            } catch (e: TimeoutCancellationException) {
+                e.printStackTrace()
+                LLog.e(TAG, "request timeout")
+                withContext(thenDispatcher) {
+                    errorConsumer(-2, "request timeout")
+                }
+            }
+        }
+    }
+    fun error(error: (Int, String) -> Unit): LCoroutine<T> {
+        errorConsumer = error
+        return this
+    }
+    companion object {
+        fun <T : Any> from(call: suspend CoroutineScope.() -> T): LCoroutine<T> {
+            return LCoroutine<T>(call)
+        }
+    }
+}
+```
+
+
+
+## 总结
+
+Coroutine总体用起来还是很便捷的
+
+- 同步思维coding也很大程度上提高了效率
+- 没有太大的坑，业务多了，可能需要对接口请求业务进行管理。
+- 没有RxJava丰富的现成操作符，需要自己进行开发
+
+总之切到Coroutine是有一定收益的
 
